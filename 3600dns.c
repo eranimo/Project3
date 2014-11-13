@@ -194,167 +194,207 @@ int main(int argc, char *argv[]) {
     }
   } else {
     // a timeout occurred
-    printf("NORESPONSE");
+    fprintf(stdout, "NORESPONSE");
     return -1;
   }
-  printf("\n");
-  dump_packet(input, 512);
-  memcpy(input, &id, 2);
+  memcpy(&id, input, 2);
   if (ntohs(id) != 1337) {
-    printf("IT AINT YOURS");
-    return 0; // not ours!
+    fprintf(stdout, "ERROR\tNot our packet");
+    return -1; // not ours!
   }
-  unsigned char line_2_first;
-  char line_2_sec;
-  memcpy(input+2, &line_2, 2);
+  memcpy(&line_2, input+2, 2);
+  line_2 = ntohs(line_2);
   //unsigned short qr = line_2_first & 0x80;
-  if (line_2_first & 0x8000) {
+  if (!(line_2 & 0x8000)) {
+    fprintf(stdout, "Error\tNot a response");
     return -1; // not a response
   }
   unsigned short opcode = line_2 & 0x7800;
   unsigned short aa;
-  if (line_2_first & 0x400) {
+  if (line_2 & 0x400) {
     aa = 1;
   } else {
     aa = 0;
   }
   unsigned short tc = line_2 & 0x200;
-  if (line_2_first & 0x200) {
-    printf("TRUNCATED");
+  if (line_2 & 0x200) {
+    fprintf(stdout, "ERROR\tTRUNCATED");
     return -1; // its trunctated
   }
   unsigned short ra = line_2 & 0x80;
-  if (line_2 & 0x80) {
-    printf("NO RECUSION");
+  if (!(line_2 & 0x80)) {
+    fprintf(stdout, "ERROR\tNO RECUSION");
     return -1; // no recursion
   }
   unsigned short rcode = 0;
   rcode &= line_2 & 0xf;
   if (rcode == 1) {
-    printf("ERROR\tFormat error");
+    fprintf(stdout, "ERROR\tFormat error");
   } else if (rcode == 2) {
-    printf("ERROR\tServer failure");
+    fprintf(stdout, "ERROR\tServer failure");
   } else if (rcode == 3 && aa == 1) {
-    printf("NOTFOUND");
+    fprintf(stdout, "NOTFOUND");
   } else if (rcode == 3 && aa == 0) {
-    printf("Error\tNot authoritative, name not found");
+    fprintf(stdout, "Error\tNot authoritative, name not found");
   } else if (rcode == 4) {
-    printf("ERROR\tNot implemented");
+    fprintf(stdout, "ERROR\tNot implemented");
   } else if (rcode == 5) {
-    printf("ERROR\tRefused");
+    fprintf(stdout, "ERROR\tRefused");
   }
-  if (!(line_2 & 0xf)) {
+  if (rcode != 0) {
     return -1;
   }
-  memcpy(input + 4, &qdcount, 2);
-  memcpy(input + 6, &ancount, 2);
+  memcpy(&qdcount, input + 4, 2);
+  memcpy(&ancount, input + 6, 2);
+  //printf("ancount: %hu\n", ntohs(ancount));
   /*if (ntohs(qdcount) != 0) {
     return -1; // not an answer
   }*/
   pos = 12; // skip the header
-  
   // if there's a question, loop over it
   /*for (int k = 0; k < ntohs(qdcount); k++) {
     printf("qdcount: %hu\n", ntohs(qdcount));
     unsigned int len = 0;
     memcpy(input + pos, &len, 1);
+    len = ntohl(len);
+    printf("len: %hu", len);
     pos++;
     while (len != 0) {
       pos += len;
       memcpy(input + pos, &len, 1);
+      len = ntohl(len);
       pos++;
     }
     pos += 4;
     printf("pos %d\n", pos); 
   }*/
+
   pos += size - 12;
 
   // loop over each answer
   char name_s[256];
-  for (int i = 0; i < ntohs(ancount); i++) {
+  
+  for (unsigned short i = 0; i < ntohs(ancount); i++) {
     // get the name
     unsigned short len;
-    memcpy(input + pos, &len, 1);
+    memcpy(&len, input + pos, 1);
     len = ntohs(len);
     pos++;
     int name_pos = 0;
     while (len != 0) {
-      memcpy(input + pos, &name_s + name_pos, len);
-      name_pos += len;
-      pos += len;
-      memcpy(input + pos, &len, 1);
-      pos++;
-      len = ntohs(len);
+      if (len & 0xC000) {
+        // pointer
+        unsigned short pointer = 0;
+        memcpy(&pointer, input + pos - 1, 2);
+        pos++;
+        pointer = htons(pointer) & 0x3fff;
+        len = 0;
+        memcpy(&len, input + pointer, 1);
+        memcpy(&name_s + name_pos, input + pointer + 1, len);
+        name_pos += len;
+        memcpy(&len, input + pos, 1);
+        len = ntohs(len);
+      } else {
+        memcpy(&name_s + name_pos, input + pos, len);
+        name_pos += len;
+        pos += len;
+        memcpy(&len, input + pos, 1);
+        pos++;
+        len = ntohs(len);
+      }
+      name_s[name_pos] = '.';
+      name_pos++;
     }
 
     // get the type
     unsigned short type;
-    memcpy(input + pos, &type, 2);
+    memcpy(&type, input + pos, 2);
     type = ntohs(type);
     pos += 2;
 
     // class
     unsigned short class;
-    memcpy(input + pos, &class, 2);
+    memcpy(&class, input + pos, 2);
     class = ntohs(class);
     pos += 2;
     if (class != 0x0001) {
-      printf("not an internet address");
+      fprintf(stdout, "ERROR\tnot an internet address");
       return -1; // not an internet address
     }
 
     // TTL
     unsigned int ttl;
-    memcpy(input + pos, &ttl, 4);
+    memcpy(&ttl, input + pos, 4);
     ttl = ntohl(ttl);
     pos += 4;
 
     // rdlength
     unsigned short rdlength;
-    memcpy(input + pos, &rdlength, 2);
+    memcpy(&rdlength, input + pos, 2);
     rdlength = ntohs(rdlength);
     pos += 2;
 
     if (type == 0x0001) {
       // ip address
-      unsigned int ip[4];
-      for (int j = 0; j < 4; j++) {
-        memcpy(input + pos, &ip[j], 1);
-        pos += 1;
-      }
+      unsigned int ip_full;
+      memcpy(&ip_full, input + pos, 4);
+      pos += 4;
+      unsigned char ip[4];
+      ip[0] = ip_full & 0xFF;
+      ip[1] = (ip_full >> 8) & 0xFF;
+      ip[2] = (ip_full >> 16) & 0xFF;
+      ip[3] = (ip_full >> 24) & 0xFF;
       printf("IP\t%d.%d.%d.%d\t", ip[0], ip[1], ip[2], ip[3]);
       if (aa == 0) {
-        printf("nonauth");
+        printf("nonauth\n");
       } else {
-        printf("auth");
+        printf("auth\n");
       }
     } else if (type == 0x0005) {
-      // name record
-      memcpy(input + pos, &len, 1);
-      pos += 1;
-      char name_c[256];
+      // printing a name
+      unsigned short read;
+      char name_c[256] = "";
       name_pos = 0;
-      int s_len = 0;
-      while(len != 0) {
-        memcpy(input + pos, &name_c + name_pos, len);
-        name_pos += len;
+
+      while (read < rdlength) {
+        memcpy(&len, input+pos, 1);
+        printf("len: %hu\n", len);
+        if (len & 0xc0) { // pointer
+          unsigned short pointer;
+          memcpy(&pointer, input + pos, 2);
+          pointer = ntohs(pointer);
+          pos += 2;
+          pointer &= 0x3fff;
+          printf("pointer: %hu\n", pointer);
+          memcpy(&len, input + pointer, 1);
+          //len = ntohs(len);
+          printf("len: %hu\n", len);
+          memcpy(name_c + name_pos, input + pointer + 1, len);
+          read++;
+          name_pos += len;
+        } else { // not a pointer
+          pos++;
+          memcpy(name_c + name_pos, input + pos, len);
+          name_pos += len;
+          read += len;
+          pos += len;
+        }
         name_c[name_pos] = '.';
         name_pos++;
-        pos += len;
-        memcpy(input + pos, &len, 1);
-        pos++;
-        s_len += len + 1;
       }
-      name_c[s_len] = '\0';
+
       printf("CNAME %s\t", name_c);
       if (aa == 0) {
-        printf("nonauth");
+        printf("nonauth\n");
       } else {
-        printf("auth");
+        printf("auth\n");
       }
     }
   }
-
+  if (ntohs(ancount) == 0) {
+    fprintf(stdout, "NOTFOUND");
+    return -1;
+  }
   return 0;
   
 }
