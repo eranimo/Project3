@@ -334,6 +334,8 @@ int main(int argc, char *argv[]) {
     rdlength = ntohs(rdlength);
     pos += 2;
 
+    dump_packet(input, 400);
+
     if (type == 0x0001) {
       // ip address
       unsigned int ip_full;
@@ -357,21 +359,20 @@ int main(int argc, char *argv[]) {
       name_pos = 0;
 
       while (read < rdlength) {
-        memcpy(&len, input+pos, 1);
+        memcpy(&len, input+pos, 1); // read the 1st byte into len
         printf("len: %hu\n", len);
-        if (len & 0xc0) { // pointer
-          unsigned short pointer;
-          memcpy(&pointer, input + pos, 2);
-          pointer = ntohs(pointer);
-          pos += 2;
-          pointer &= 0x3fff;
+        if (len & 0xc0) { // pointer (len starts with bits 11)
+          unsigned short pointer; 
+          memcpy(&pointer, input + pos, 2); // get the byte put in len and the next as a pointer
+          pointer = ntohs(pointer); // order the pointer correctly
+          pointer = pointer & 0x3fff; // remove the first two 1's from the pointer
           printf("pointer: %hu\n", pointer);
-          memcpy(&len, input + pointer, 1);
-          //len = ntohs(len);
-          printf("len: %hu\n", len);
-          memcpy(name_c + name_pos, input + pointer + 1, len);
-          read++;
-          name_pos += len;
+          memcpy(&len, input + pointer, 1); // get the length of the string at the pointer
+          printf("len: %hu\n", len); 
+          memcpy(name_c + name_pos, input + pointer + 1, len); // read len bytes into the name string
+          read++; // read 1 pointer
+          name_pos += len; // move len bytes forward in name_c
+          pos += 2;
         } else { // not a pointer
           pos++;
           memcpy(name_c + name_pos, input + pos, len);
@@ -397,4 +398,36 @@ int main(int argc, char *argv[]) {
   }
   return 0;
   
+}
+/*
+ * read_name starts at the given offset and reads until it either
+ * passes off the job to another iteration of itself after finding
+ * a pointer or reaches a 0 octet
+ */
+char *read_name(char *input, unsigned short offset) {
+  char val[256];
+  int val_pos = 0;
+  unsigned short len;
+  memcpy(&len, input + offset, 1);
+  len = ntohs(len);
+  while (len != 0) {
+    if (len & 0xc0) { // pointer
+      unsigned short pointer;
+      memcpy(&pointer, input+offset, 2);
+      pointer = ntohs(pointer);
+      pointer &= 0x3fff;
+      char *rest = read_name(input, pointer);
+      strcpy(val+val_pos, rest, 256-val_pos);
+      return val;
+    } else { // not a pointer
+      offset++;
+      memcpy(val+val_pos, input+offset, len);
+      offset += len;
+      val_pos += len;
+      val[val_pos] = '.';
+      val_pos++;
+    }
+  }
+  val[val_pos-1] = '\0';
+  return val;
 }
