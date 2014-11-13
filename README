@@ -5,8 +5,23 @@ Kaelan Cooter and Samantha Sanborn
 
 Overall Approach:
 
-Since every request we send has a constant header, we first put together a header that we could use for all our requests.
-Once we had the header, we formulated our question. We measured the length the the QNAME would occupy, allocated appropriate
-space, and then tokenized the name from the arguments and wrote it into our response packet, followed by appropriate values
-for QTYPE and QCLASS before sending to the server. Although our header is theoretically constant, we did split it into several
-variables for readability and to allow changes to be made easily if needed.
+Since every request we send has a constant header, we first put together a 
+header that we could use for all our requests. Once we had the header, we 
+formulated our question. We measured the length the the QNAME would occupy, 
+allocated appropriate space, and then tokenized the name from the arguments 
+and wrote it into our response packet, followed by appropriate values for 
+QTYPE and QCLASS before sending to the server. Although our header is 
+theoretically constant, we did split it into several variables for readability 
+and to allow changes to be made easily if needed.
+
+Testing
+---
+We used used the gdb debugger as well as good old-fashioned print statements 
+to debug how our DNS requests and responses were being sent and interpreted.
+
+Challenges
+---
+We had a few problems getting the responses to be read correctly. A main 
+problem was also in the DNS Packet Compression, which proved to be the 
+source of many bugs. The most time consuming part was probably the parsing 
+of the name fields on the responses and requests.
