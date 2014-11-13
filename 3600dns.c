@@ -156,19 +156,23 @@ int main(int argc, char *argv[]) {
   // next, construct the destination address
   struct sockaddr_in out;
   out.sin_family = AF_INET;
-  out.sin_port = htons(53);
-  out.sin_addr.s_addr = inet_addr("129.10.112.152");
+  out.sin_port = htons(port);
+  out.sin_addr.s_addr = inet_addr(server);
+
+  dump_packet(request, size);
 
   if (sendto(sock, request, size, 0, &out, sizeof(out)) < 0) {
     // an error occurred
+    return -1;
   }
-  dump_packet(request, size);
-  return 0;
-  /*
 
   // wait for the DNS reply (timeout: 5 seconds)
   struct sockaddr_in in;
+  in.sin_family = AF_INET;
+  in.sin_port = htons(port);
+  in.sin_addr.s_addr = inet_addr(server);
   socklen_t in_len;
+  in_len = sizeof(in);
 
   // construct the socket set
   fd_set socks;
@@ -177,21 +181,150 @@ int main(int argc, char *argv[]) {
 
   // construct the timeout
   struct timeval t;
-  t.tv_sec = ;
+  t.tv_sec = 5;
   t.tv_usec = 0;
 
   // wait to receive, or for a timeout
+  char *input = (char *) malloc(65536);
   if (select(sock + 1, &socks, NULL, NULL, &t)) {
-    if (recvfrom(sock, <<your input buffer>>, <<input len>>, 0, &in, &in_len) < 0) {
+    if (recvfrom(sock, input, 65536, 0, &in, &in_len) < 0) {
       // an error occured
+      perror("Recvfrom");
+      return -1;
     }
   } else {
     // a timeout occurred
+    printf("NORESPONSE");
+    return -1;
+  }
+  printf("\n");
+  dump_packet(input, 65536);
+  memcpy(input, &id, 2);
+  if (ntohs(id) != 1337) {
+    printf("IT AINT YOURS");
+    return 0; // not ours!
+  }
+  memcpy(input, &line_2, 2);
+  unsigned short qr = line_2 & 0x8000;
+  //if (ntohs(qr) != 1) {
+  //  printf("NOT A RESPONSE %d", ntohs(qr));
+  //  return -1; // not a response
+  //}
+  unsigned short opcode = ntohs(line_2 & 0x7800);
+  unsigned short aa = ntohs(line_2 & 0x400);
+  unsigned short tc = ntohs(line_2 & 0x200);
+  if (tc == 1) {
+    printf("TRUNCATED");
+    return -1; // its trunctated
+  }
+  unsigned short ra = ntohs(line_2 & 0x80);
+  if (ra == 0) {
+    printf("NO RECUSION");
+    return -1; // no recursion
+  }
+  unsigned short rcode = ntohs(line_2 & 0xf);
+  if (rcode == 1) {
+    printf("ERROR\tFormat error");
+  } else if (rcode == 2) {
+    printf("ERROR\tServer failure");
+  } else if (rcode == 3 && aa == 1) {
+    printf("NOTFOUND");
+  } else if (rcode == 3 && aa == 0) {
+    printf("Error\tNot authoritative, name not found");
+  } else if (rcode == 4) {
+    printf("ERROR\tNot implemented");
+  } else if (rcode == 5) {
+    printf("ERROR\tRefused");
+  }
+  if (rcode != 0) {
+    return -1;
+  }
+  memcpy(input + 4, &qdcount, 2);
+  memcpy(input + 6, &ancount, 2);
+  if (ntohs(qdcount) != 0) {
+    return -1; // not an answer
+  }
+  input += 12; // skip the header
+  
+  // loop over each answer
+  char name_s[256];
+  for (int i = 0; i < ntohs(ancount); i++) {
+    // get the name
+    unsigned short len;
+    memcpy(input, &len, 1);
+    int pos = 1;
+    int name_pos = 0;
+    while (len != 0) {
+      memcpy(input + pos, &name_s + name_pos, len);
+      name_pos += len;
+      pos += len;
+      memcpy(input + pos, &len, 1);
+      pos++;
+    }
+
+    // get the type
+    unsigned short type;
+    memcpy(input + pos, &type, 2);
+    pos += 2;
+
+    // class
+    unsigned short class;
+    memcpy(input + pos, &class, 2);
+    pos += 2;
+    if (class != 0x0001) {
+      return -1; // not an internet address
+    }
+
+    // TTL
+    unsigned int ttl;
+    memcpy(input + pos, &ttl, 4);
+    pos += 4;
+
+    // rdlength
+    unsigned short rdlength;
+    memcpy(input + pos, &rdlength, 2);
+    pos += 2;
+
+    if (type == 0x0001) {
+      // ip address
+      unsigned int ip[4];
+      for (int j = 0; j < 4; j++) {
+        memcpy(input + pos, &ip[j], 1);
+        pos += 1;
+      }
+      printf("IP\t%d.%d.%d.%d\t", ip[0], ip[1], ip[2], ip[3]);
+      if (aa == 0) {
+        printf("nonauth");
+      } else {
+        printf("auth");
+      }
+    } else if (type == 0x0005) {
+      // name record
+      memcpy(input + pos, &len, 1);
+      pos += 1;
+      char name_c[256];
+      name_pos = 0;
+      int s_len = 0;
+      while(len != 0) {
+        memcpy(input + pos, &name_c + name_pos, len);
+        name_pos += len;
+        name_c[name_pos] = '.';
+        name_pos++;
+        pos += len;
+        memcpy(input + pos, &len, 1);
+        pos++;
+        s_len += len + 1;
+      }
+      name_c[s_len] = '\0';
+      printf("CNAME %s\t", name_c);
+      if (aa == 0) {
+        printf("nonauth");
+      } else {
+        printf("auth");
+      }
+    }
   }
 
-  // print out the result
-  
   return 0;
-  */
   
 }
