@@ -1,1 +1,12 @@
-testing
+CS3600 Fall 2014
+Kaelan Cooter and Samantha Sanborn
+
+---
+
+Overall Approach:
+
+Since every request we send has a constant header, we first put together a header that we could use for all our requests.
+Once we had the header, we formulated our question. We measured the length the the QNAME would occupy, allocated appropriate
+space, and then tokenized the name from the arguments and wrote it into our response packet, followed by appropriate values
+for QTYPE and QCLASS before sending to the server. Although our header is theoretically constant, we did split it into several
+variables for readability and to allow changes to be made easily if needed.
