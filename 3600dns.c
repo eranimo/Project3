@@ -168,9 +168,9 @@ int main(int argc, char *argv[]) {
 
   // wait for the DNS reply (timeout: 5 seconds)
   struct sockaddr_in in;
-  in.sin_family = AF_INET;
+  /*in.sin_family = AF_INET;
   in.sin_port = htons(port);
-  in.sin_addr.s_addr = inet_addr(server);
+  in.sin_addr.s_addr = inet_addr(server);*/
   socklen_t in_len;
   in_len = sizeof(in);
 
@@ -198,31 +198,38 @@ int main(int argc, char *argv[]) {
     return -1;
   }
   printf("\n");
-  dump_packet(input, 65536);
+  dump_packet(input, 512);
   memcpy(input, &id, 2);
   if (ntohs(id) != 1337) {
     printf("IT AINT YOURS");
     return 0; // not ours!
   }
-  memcpy(input, &line_2, 2);
-  unsigned short qr = line_2 & 0x8000;
-  //if (ntohs(qr) != 1) {
-  //  printf("NOT A RESPONSE %d", ntohs(qr));
-  //  return -1; // not a response
-  //}
-  unsigned short opcode = ntohs(line_2 & 0x7800);
-  unsigned short aa = ntohs(line_2 & 0x400);
-  unsigned short tc = ntohs(line_2 & 0x200);
-  if (tc == 1) {
+  unsigned char line_2_first;
+  char line_2_sec;
+  memcpy(input+2, &line_2, 2);
+  //unsigned short qr = line_2_first & 0x80;
+  if (line_2_first & 0x8000) {
+    return -1; // not a response
+  }
+  unsigned short opcode = line_2 & 0x7800;
+  unsigned short aa;
+  if (line_2_first & 0x400) {
+    aa = 1;
+  } else {
+    aa = 0;
+  }
+  unsigned short tc = line_2 & 0x200;
+  if (line_2_first & 0x200) {
     printf("TRUNCATED");
     return -1; // its trunctated
   }
-  unsigned short ra = ntohs(line_2 & 0x80);
-  if (ra == 0) {
+  unsigned short ra = line_2 & 0x80;
+  if (line_2 & 0x80) {
     printf("NO RECUSION");
     return -1; // no recursion
   }
-  unsigned short rcode = ntohs(line_2 & 0xf);
+  unsigned short rcode = 0;
+  rcode &= line_2 & 0xf;
   if (rcode == 1) {
     printf("ERROR\tFormat error");
   } else if (rcode == 2) {
@@ -236,23 +243,40 @@ int main(int argc, char *argv[]) {
   } else if (rcode == 5) {
     printf("ERROR\tRefused");
   }
-  if (rcode != 0) {
+  if (!(line_2 & 0xf)) {
     return -1;
   }
   memcpy(input + 4, &qdcount, 2);
   memcpy(input + 6, &ancount, 2);
-  if (ntohs(qdcount) != 0) {
+  /*if (ntohs(qdcount) != 0) {
     return -1; // not an answer
-  }
-  input += 12; // skip the header
+  }*/
+  pos = 12; // skip the header
   
+  // if there's a question, loop over it
+  /*for (int k = 0; k < ntohs(qdcount); k++) {
+    printf("qdcount: %hu\n", ntohs(qdcount));
+    unsigned int len = 0;
+    memcpy(input + pos, &len, 1);
+    pos++;
+    while (len != 0) {
+      pos += len;
+      memcpy(input + pos, &len, 1);
+      pos++;
+    }
+    pos += 4;
+    printf("pos %d\n", pos); 
+  }*/
+  pos += size - 12;
+
   // loop over each answer
   char name_s[256];
   for (int i = 0; i < ntohs(ancount); i++) {
     // get the name
     unsigned short len;
-    memcpy(input, &len, 1);
-    int pos = 1;
+    memcpy(input + pos, &len, 1);
+    len = ntohs(len);
+    pos++;
     int name_pos = 0;
     while (len != 0) {
       memcpy(input + pos, &name_s + name_pos, len);
@@ -260,29 +284,35 @@ int main(int argc, char *argv[]) {
       pos += len;
       memcpy(input + pos, &len, 1);
       pos++;
+      len = ntohs(len);
     }
 
     // get the type
     unsigned short type;
     memcpy(input + pos, &type, 2);
+    type = ntohs(type);
     pos += 2;
 
     // class
     unsigned short class;
     memcpy(input + pos, &class, 2);
+    class = ntohs(class);
     pos += 2;
     if (class != 0x0001) {
+      printf("not an internet address");
       return -1; // not an internet address
     }
 
     // TTL
     unsigned int ttl;
     memcpy(input + pos, &ttl, 4);
+    ttl = ntohl(ttl);
     pos += 4;
 
     // rdlength
     unsigned short rdlength;
     memcpy(input + pos, &rdlength, 2);
+    rdlength = ntohs(rdlength);
     pos += 2;
 
     if (type == 0x0001) {
